@@ -28,3 +28,6 @@ out/
 
 # --- docker ---
 pgdata/
+
+# --- lab instructions (local only) ---
+Lab2_інструкція.md
