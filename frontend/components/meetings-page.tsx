@@ -87,7 +87,7 @@ export function MeetingsPage() {
       <PageHeader
         icon="📅"
         title="Meetings"
-        description="Everything on the team calendar, and how this week compares to the last."
+        description="Everything on the team calendar, and how this week compares to last week."
         action={
           <Button size="lg" onClick={() => setDialogOpen(true)}>
             <Plus data-icon="inline-start" className="size-4" />
