@@ -31,7 +31,7 @@ for var in AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
   [[ -n "${!var:-}" ]] || unset "${var}"
 done
 
-PROJECT_NAME="${PROJECT_NAME:-peach}"
+PROJECT_NAME="${PROJECT_NAME:-spry}"
 STACK_NAME="${FRONTEND_STACK_NAME:-${PROJECT_NAME}-frontend}"
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 export AWS_DEFAULT_REGION="${AWS_REGION}"
@@ -58,14 +58,16 @@ fi
 # NEXT_PUBLIC_API_URL in .env points at localhost for Compose; it is not what a
 # deployed bundle should be compiled against. BACKEND_URL is.
 API_URL="${BACKEND_URL:-}"
+if [[ -z "${API_URL}" ]]; then
+  # CI has no .env: ask the backend stack instead.
+  API_URL="$(aws cloudformation describe-stacks --stack-name "${BACKEND_STACK_NAME:-${PROJECT_NAME}-backend}" \
+    --query "Stacks[0].Outputs[?OutputKey=='PublicApiUrl'].OutputValue" --output text 2>/dev/null || true)"
+  [[ "${API_URL}" == "None" ]] && API_URL=""
+fi
 API_URL="${API_URL%/}"
 [[ -n "${API_URL}" ]] || die "BACKEND_URL is not set in .env - run make deploy-backend first"
 
 log "building against ${API_URL}"
-
-# The Cognito ids are compiled in too; without them nobody could sign in.
-[[ -n "${COGNITO_CLIENT_ID:-}" && -n "${COGNITO_DOMAIN:-}" ]] \
-  || die "COGNITO_CLIENT_ID / COGNITO_DOMAIN are not set in .env - run make deploy-cognito first"
 
 # The function URL is always HTTPS; plain HTTP here means a hand-edited .env.
 [[ "${API_URL}" == https://* ]] \
@@ -112,10 +114,6 @@ log "building the static export"
 rm -rf "${APP}/out"
 (cd "${APP}" && NEXT_OUTPUT=export \
   NEXT_PUBLIC_API_URL="${API_URL}" \
-  NEXT_PUBLIC_COGNITO_REGION="${COGNITO_REGION:-${AWS_REGION}}" \
-  NEXT_PUBLIC_COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID}" \
-  NEXT_PUBLIC_COGNITO_DOMAIN="${COGNITO_DOMAIN}" \
-  NEXT_PUBLIC_COGNITO_GOOGLE_ENABLED="${COGNITO_GOOGLE_ENABLED:-false}" \
   "${PM[@]}" build)
 [[ -f "${APP}/out/index.html" ]] || die "the export produced no out/index.html"
 
@@ -150,14 +148,10 @@ aws cloudfront wait invalidation-completed \
 
 echo
 echo "  site       ${SITE_URL}"
-echo "  items      ${SITE_URL}/items"
 echo "  api        ${API_URL}"
 echo "  bucket     s3://${BUCKET}"
 echo
 
-echo "If this was the first frontend deploy, run make deploy-cognito again so"
-echo "Google sign-in may redirect back to ${SITE_URL}."
-echo
 echo "Now allow the site's origin through CORS:"
 echo
 echo "  API_CORS_ORIGINS=${SITE_URL}   in .env, then: make deploy-backend"

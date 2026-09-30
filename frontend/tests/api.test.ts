@@ -1,12 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, api } from "@/lib/api";
-import { getIdToken, signOut } from "@/lib/auth";
-
-vi.mock("@/lib/auth", () => ({
-  getIdToken: vi.fn(async () => "id-token"),
-  signOut: vi.fn(),
-}));
 
 function mockFetch(body: unknown, init: { status?: number } = {}) {
   const status = init.status ?? 200;
@@ -17,52 +11,55 @@ function mockFetch(body: unknown, init: { status?: number } = {}) {
   } as Response);
 }
 
+const meeting = {
+  id: "11111111-1111-1111-1111-111111111111",
+  title: "Weekly sync",
+  starts_at: "2026-10-01T07:00:00Z",
+  ends_at: "2026-10-01T07:30:00Z",
+  attendee_count: 5,
+  created_at: "2026-09-30T12:00:00Z",
+};
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("api", () => {
-  it("parses a list response", async () => {
-    mockFetch({ items: [], total: 0 });
-    await expect(api.listItems()).resolves.toEqual({ items: [], total: 0 });
+  it("parses the meeting list", async () => {
+    const spy = mockFetch([meeting]);
+    await expect(api.listMeetings()).resolves.toEqual([meeting]);
+    expect(spy.mock.calls[0][0]).toMatch(/\/api\/meetings$/);
   });
 
-  it("passes pagination through as query parameters", async () => {
-    const spy = mockFetch({ items: [], total: 0 });
-    await api.listItems({ limit: 5, offset: 10 });
-    expect(spy.mock.calls[0][0]).toContain("/api/v1/items?limit=5&offset=10");
+  it("posts a new meeting as JSON", async () => {
+    const spy = mockFetch(meeting, { status: 201 });
+    const payload = {
+      title: meeting.title,
+      starts_at: meeting.starts_at,
+      ends_at: meeting.ends_at,
+      attendee_count: meeting.attendee_count,
+    };
+    await expect(api.createMeeting(payload)).resolves.toEqual(meeting);
+    const init = spy.mock.calls[0][1];
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual(payload);
   });
 
   it("raises ApiError carrying the detail from the backend", async () => {
-    mockFetch({ detail: "Item not found" }, { status: 404 });
-    await expect(api.listItems()).rejects.toMatchObject({
-      status: 404,
-      message: "Item not found",
+    mockFetch({ detail: "database unavailable" }, { status: 503 });
+    await expect(api.listMeetings()).rejects.toMatchObject({
+      status: 503,
+      message: "database unavailable",
     });
   });
 
-  it("sends the ID token as a bearer token", async () => {
-    const spy = mockFetch({ items: [], total: 0 });
-    await api.listItems();
-    const headers = spy.mock.calls[0][1]?.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer id-token");
-  });
-
-  it("does not call the API at all when signed out", async () => {
-    vi.mocked(getIdToken).mockResolvedValueOnce(null);
-    const spy = mockFetch({ items: [], total: 0 });
-    await expect(api.listItems()).rejects.toMatchObject({ status: 401 });
-    expect(spy).not.toHaveBeenCalled();
-  });
-
-  it("signs out when the API rejects the token", async () => {
-    mockFetch({ detail: "Token expired" }, { status: 401 });
-    await expect(api.listItems()).rejects.toMatchObject({ status: 401 });
-    expect(signOut).toHaveBeenCalled();
+  it("rejects a response that breaks the contract", async () => {
+    mockFetch([{ ...meeting, attendee_count: "five" }]);
+    await expect(api.listMeetings()).rejects.toThrow();
   });
 
   it("raises ApiError when the network is unreachable", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       throw new TypeError("failed");
     });
-    await expect(api.listItems()).rejects.toBeInstanceOf(ApiError);
+    await expect(api.listMeetings()).rejects.toBeInstanceOf(ApiError);
   });
 });

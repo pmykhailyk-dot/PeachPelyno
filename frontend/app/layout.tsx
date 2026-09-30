@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Peach",
-  description: "FastAPI + Next.js + Postgres starter",
+  title: "Spry — Meetings",
+  description: "Team meetings at a glance",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -1,0 +1,176 @@
+name: CI/CD
+
+# Every push and pull request is linted and tested (CI). A green push to main
+# is then deployed - backend first, frontend second (CD). Both deploys run the
+# same Makefile targets you run on your laptop; CI has no recipe of its own.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  backend:
+    name: Backend - ruff + pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      # A real Postgres for the tests, like the one Compose runs.
+      db:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: spry
+          POSTGRES_PASSWORD: spry
+          POSTGRES_DB: spry
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U spry -d spry"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://spry:spry@localhost:5432/spry
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - run: uv python install 3.14
+      - run: uv sync --frozen
+
+      - name: ruff check
+        run: uv run ruff check --output-format=github .
+      - name: ruff format --check
+        run: uv run ruff format --check --diff .
+      - name: pytest
+        run: uv run pytest -q
+      - name: migrations match the models
+        run: uv run alembic upgrade head && uv run alembic check
+
+  frontend:
+    name: Frontend - eslint + prettier + tsc + vitest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - name: eslint
+        run: pnpm lint
+      - name: prettier --check
+        run: pnpm format:check
+      - name: tsc --noEmit
+        # next typegen writes the route types (LayoutProps...) tsc needs.
+        run: pnpm exec next typegen && pnpm exec tsc --noEmit
+      - name: vitest
+        run: pnpm test
+
+  deploy-backend:
+    name: Deploy backend (ECR -> Lambda)
+    needs: [backend, frontend]
+    # Only a green push to main deploys, and only once `make github-role` has
+    # set the role variable - until then this is skipped, not red.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-backend
+      cancel-in-progress: false
+    permissions:
+      # Lets the job ask GitHub for an OIDC token, which AWS trades for
+      # short-lived credentials. No access key is stored anywhere.
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      PROJECT_NAME: ${{ vars.PROJECT_NAME || 'spry' }}
+      # The image is tagged with the full commit SHA: you always know exactly
+      # which commit is running, and a rollback is "deploy the previous tag".
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-deploy-backend-${{ github.run_id }}
+
+      # The function runs on arm64 and this runner is x86, so the image is
+      # built under emulation.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: make deploy-backend
+        run: make deploy-backend
+
+      - name: Summary
+        if: always()
+        run: |
+          API_URL=$(aws cloudformation describe-stacks --stack-name "${PROJECT_NAME}-backend" \
+            --query "Stacks[0].Outputs[?OutputKey=='PublicApiUrl'].OutputValue" \
+            --output text 2>/dev/null || echo "unknown")
+          {
+            echo "### Backend deploy"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| image tag | \`${IMAGE_TAG}\` |"
+            echo "| api | ${API_URL} |"
+            echo "| result | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-frontend:
+    name: Deploy frontend (S3 -> CloudFront)
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-frontend
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      PROJECT_NAME: ${{ vars.PROJECT_NAME || 'spry' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-deploy-frontend-${{ github.run_id }}
+
+      # BACKEND_URL is read from the backend stack's PublicApiUrl output.
+      - name: make deploy-frontend
+        run: make deploy-frontend

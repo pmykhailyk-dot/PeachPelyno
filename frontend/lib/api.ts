@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-import { getIdToken, signOut } from "@/lib/auth";
-
 /** Browser code must reach the API through the published port; server components
  *  resolve the Compose service name instead. */
 export function apiBaseUrl(): string {
@@ -26,10 +24,6 @@ async function request<T>(
   schema: z.ZodType<T>,
   init?: RequestInit,
 ): Promise<T> {
-  // Every API route needs a signed-in user; don't send what would bounce.
-  const token = await getIdToken();
-  if (!token) throw new ApiError(401, "You are signed out");
-
   let response: Response;
   try {
     response = await fetch(`${apiBaseUrl()}${path}`, {
@@ -37,17 +31,12 @@ async function request<T>(
       cache: "no-store",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
         ...(init?.headers ?? {}),
       },
     });
   } catch {
     throw new ApiError(0, "Could not reach the API");
   }
-
-  // The API no longer accepts this session (revoked, or the pool changed):
-  // drop it, and the auth gate sends the user back to the login page.
-  if (response.status === 401) signOut();
 
   if (!response.ok) {
     const detail = await response
@@ -60,73 +49,48 @@ async function request<T>(
     );
   }
 
-  if (response.status === 204) {
-    return schema.parse(undefined);
-  }
   return schema.parse(await response.json());
 }
 
-/* --- schemas mirroring the API contract in README section 5 --- */
+/* --- schemas mirroring the API contract in PROJECT.md section 5 --- */
 
-export const itemStatuses = ["todo", "in_progress", "done"] as const;
-export const itemStatusSchema = z.enum(itemStatuses);
-
-export const itemSchema = z.object({
+export const meetingSchema = z.object({
   id: z.string(),
-  name: z.string(),
-  description: z.string().nullable(),
-  status: itemStatusSchema,
+  title: z.string(),
+  starts_at: z.string(), // ISO 8601 with offset, e.g. 2026-10-01T07:00:00Z
+  ends_at: z.string(),
+  attendee_count: z.number().int(),
   created_at: z.string(),
-  updated_at: z.string(),
 });
 
-export const itemListSchema = z.object({
-  items: z.array(itemSchema),
-  total: z.number().int(),
-});
+export const meetingListSchema = z.array(meetingSchema);
 
 export const healthSchema = z.object({
   status: z.string(),
   database: z.string(),
 });
 
-export const itemInputSchema = z.object({
-  name: z.string().min(1, "Name is required").max(120, "Name is too long"),
-  description: z.string().max(2000, "Description is too long").optional(),
-  status: itemStatusSchema,
-});
+/** What POST /api/meetings accepts. Datetimes must carry an offset. */
+export type MeetingCreate = {
+  title: string;
+  starts_at: string;
+  ends_at: string;
+  attendee_count: number;
+};
 
-export type ItemStatus = z.infer<typeof itemStatusSchema>;
-export type Item = z.infer<typeof itemSchema>;
-export type ItemList = z.infer<typeof itemListSchema>;
+export type Meeting = z.infer<typeof meetingSchema>;
 export type Health = z.infer<typeof healthSchema>;
-export type ItemInput = z.infer<typeof itemInputSchema>;
 
 /* --- endpoints --- */
 
 export const api = {
-  readiness: () => request("/api/v1/health/ready", healthSchema),
+  readiness: () => request("/api/health/ready", healthSchema),
 
-  listItems: (params: { limit?: number; offset?: number } = {}) => {
-    const query = new URLSearchParams();
-    if (params.limit !== undefined) query.set("limit", String(params.limit));
-    if (params.offset !== undefined) query.set("offset", String(params.offset));
-    const suffix = query.size > 0 ? `?${query}` : "";
-    return request(`/api/v1/items${suffix}`, itemListSchema);
-  },
+  listMeetings: () => request("/api/meetings", meetingListSchema),
 
-  createItem: (payload: ItemInput) =>
-    request("/api/v1/items", itemSchema, {
+  createMeeting: (payload: MeetingCreate) =>
+    request("/api/meetings", meetingSchema, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-
-  updateItem: (id: string, payload: Partial<ItemInput>) =>
-    request(`/api/v1/items/${id}`, itemSchema, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }),
-
-  deleteItem: (id: string) =>
-    request(`/api/v1/items/${id}`, z.undefined(), { method: "DELETE" }),
 };

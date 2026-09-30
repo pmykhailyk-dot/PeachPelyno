@@ -1,25 +1,29 @@
 #!/usr/bin/env bash
-# Put a custom domain, with HTTPS, on the deployed frontend's CloudFront
-# distribution. Only the frontend gets a custom domain - the API stays on its
-# Lambda function URL - and it is assigned here, separately from
-# `make deploy-frontend`, which never touches the domain settings.
+# Put a custom domain, with HTTPS, on a deployed service:
 #
-#   scripts/domain-frontend.sh cert     request + DNS-validate an ACM certificate
-#   scripts/domain-frontend.sh domain   the above, then attach it to the distribution
+#   frontend  -> the CloudFront distribution            (app.example.com)
+#   backend   -> an API Gateway HTTP API over the Lambda (api.example.com)
+#
+# Assigned here, separately from `make deploy-*`, which never touch the domain
+# settings.
+#
+#   scripts/domain.sh <frontend|backend> cert     request + DNS-validate an ACM certificate
+#   scripts/domain.sh <frontend|backend> domain   the above, then attach it
 #
 # Both are idempotent: an existing certificate for the domain is reused rather
 # than re-requested, and re-running after DNS is in place just re-checks.
 set -euo pipefail
 
-MODE="${1:-domain}"
-case "${MODE}" in
-  cert | domain) ;;
-  *) echo "usage: $0 [cert|domain]" >&2; exit 2 ;;
+TARGET="${1:-}"
+MODE="${2:-domain}"
+case "${TARGET}:${MODE}" in
+  frontend:cert | frontend:domain | backend:cert | backend:domain) ;;
+  *) echo "usage: $0 <frontend|backend> [cert|domain]" >&2; exit 2 ;;
 esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT}/.env"
-TEMPLATE="${ROOT}/infra/frontend.yaml"
+TEMPLATE="${ROOT}/infra/${TARGET}.yaml"
 
 log() { printf '\033[36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m==>\033[0m %s\n' "$*" >&2; }
@@ -42,17 +46,28 @@ for var in AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
   [[ -n "${!var:-}" ]] || unset "${var}"
 done
 
-PROJECT_NAME="${PROJECT_NAME:-peach}"
-STACK_NAME="${FRONTEND_STACK_NAME:-${PROJECT_NAME}-frontend}"
+PROJECT_NAME="${PROJECT_NAME:-spry}"
+if [[ "${TARGET}" == frontend ]]; then
+  STACK_NAME="${FRONTEND_STACK_NAME:-${PROJECT_NAME}-frontend}"
+  DOMAIN_VAR=DOMAIN_NAME
+else
+  STACK_NAME="${STACK_NAME:-${PROJECT_NAME}-backend}"
+  DOMAIN_VAR=API_DOMAIN_NAME
+fi
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 export AWS_DEFAULT_REGION="${AWS_REGION}"
-# CloudFront only takes certificates from us-east-1, whatever the stack region.
-ACM_REGION=us-east-1
+# CloudFront only takes certificates from us-east-1, whatever the stack region;
+# a regional API Gateway domain wants one from its own region.
+if [[ "${TARGET}" == frontend ]]; then
+  ACM_REGION=us-east-1
+else
+  ACM_REGION="${AWS_REGION}"
+fi
 
-# `make domain DOMAIN=app.example.com` wins over whatever .env remembers.
-DOMAIN="${DOMAIN:-${DOMAIN_NAME:-}}"
+# `make domain-frontend DOMAIN=app.example.com` wins over whatever .env remembers.
+DOMAIN="${DOMAIN:-${!DOMAIN_VAR:-}}"
 DOMAIN="${DOMAIN%.}"
-[[ -n "${DOMAIN}" ]] || die "no domain - run: make ${MODE} DOMAIN=app.example.com"
+[[ -n "${DOMAIN}" ]] || die "no domain - run: make domain-${TARGET} DOMAIN=<name>"
 
 for tool in aws python3; do
   command -v "${tool}" >/dev/null 2>&1 || die "${tool} is required but not installed"
@@ -208,11 +223,11 @@ fi
 log "certificate issued"
 # Only the domain is remembered. The zone and the certificate are looked up
 # again on every run, so neither needs to live in .env.
-env_set DOMAIN_NAME "${DOMAIN}"
+env_set "${DOMAIN_VAR}" "${DOMAIN}"
 
 if [[ "${MODE}" == "cert" ]]; then
   echo
-  echo "Certificate ready. Attach it with: make domain"
+  echo "Certificate ready. Attach it with: make domain-${TARGET}"
   exit 0
 fi
 
@@ -221,16 +236,25 @@ fi
 # Only the domain parameters change; every other parameter keeps the stack's
 # current value, and the site itself is not rebuilt.
 aws cloudformation describe-stacks --stack-name "${STACK_NAME}" >/dev/null 2>&1 \
-  || die "stack ${STACK_NAME} does not exist yet - run make deploy-frontend first"
+  || die "stack ${STACK_NAME} does not exist yet - run make deploy-${TARGET} first"
 
-log "attaching ${DOMAIN} to the distribution (CloudFront takes a few minutes)"
+# Only the domain parameters are named; `aws cloudformation deploy` keeps every
+# other parameter (the image, the database password...) at its current value.
+if [[ "${TARGET}" == frontend ]]; then
+  log "attaching ${DOMAIN} to the distribution (CloudFront takes a few minutes)"
+  OVERRIDES=("DomainName=${DOMAIN}" "AcmCertificateArn=${CERT_ARN}" "HostedZoneId=${ZONE_ID}")
+  TARGET_OUTPUT=DistributionDomainName
+else
+  log "putting ${DOMAIN} in front of the API"
+  OVERRIDES=("ApiDomainName=${DOMAIN}" "ApiCertificateArn=${CERT_ARN}" "ApiHostedZoneId=${ZONE_ID}")
+  TARGET_OUTPUT=ApiDomainTarget
+fi
+
 if ! aws cloudformation deploy \
   --stack-name "${STACK_NAME}" \
   --template-file "${TEMPLATE}" \
-  --parameter-overrides \
-    "DomainName=${DOMAIN}" \
-    "AcmCertificateArn=${CERT_ARN}" \
-    "HostedZoneId=${ZONE_ID}" \
+  --parameter-overrides "${OVERRIDES[@]}" \
+  --capabilities CAPABILITY_IAM \
   --no-fail-on-empty-changeset \
   --tags "PROJECT_NAME=${PROJECT_NAME}"; then
   warn "deploy failed - most recent failure reasons:"
@@ -241,26 +265,35 @@ if ! aws cloudformation deploy \
   exit 1
 fi
 
-TARGET="$(stack_output DistributionDomainName)"
+DNS_TARGET="$(stack_output "${TARGET_OUTPUT}")"
 
 if [[ -z "${ZONE_ID}" ]]; then
   echo
   if [[ "${DOMAIN}" == *.*.* ]]; then
-    echo "  Last step - point ${DOMAIN} at CloudFront:"
+    echo "  Last step - point ${DOMAIN} at ${TARGET}:"
     echo
     echo "    name   ${DOMAIN}"
     echo "    type   CNAME"
-    echo "    value  ${TARGET}"
+    echo "    value  ${DNS_TARGET}"
   else
-    echo "  Last step - point ${DOMAIN} at ${TARGET}."
+    echo "  Last step - point ${DOMAIN} at ${DNS_TARGET}."
     warn "${DOMAIN} is a zone apex, which cannot be a CNAME. Either move the"
     warn "zone to Route 53 and re-run, or use your provider's ALIAS/ANAME record."
   fi
   echo
 fi
 
-echo "  https://${DOMAIN} - the cloudfront.net name keeps working too"
-echo
-echo "Let the API accept the new origin:"
-echo
-echo "  API_CORS_ORIGINS=https://${DOMAIN}   in .env, then: make deploy-backend"
+if [[ "${TARGET}" == frontend ]]; then
+  echo "  https://${DOMAIN} - the cloudfront.net name keeps working too"
+  echo
+  echo "Let the API accept the new origin:"
+  echo
+  echo "  API_CORS_ORIGINS=https://${DOMAIN}   in .env, then: make deploy-backend"
+else
+  echo "  https://${DOMAIN}/api/meetings - the function URL keeps working too"
+  echo
+  echo "Rebuild the frontend against it:"
+  echo
+  echo "  make deploy-backend    (writes BACKEND_URL=https://${DOMAIN} to .env)"
+  echo "  make deploy-frontend"
+fi

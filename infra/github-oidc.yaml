@@ -11,12 +11,12 @@ Description: >-
 Parameters:
   ProjectName:
     Type: String
-    Default: peach
+    Default: spry
     Description: Scopes what the role is allowed to touch.
 
   GitHubRepo:
     Type: String
-    Description: owner/repo, e.g. dobosevych/Peach
+    Description: owner/repo, e.g. dobosevych/Spry
     AllowedPattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
 
   SubjectClaim:
@@ -84,7 +84,7 @@ Resources:
         # Deliberately not AdministratorAccess. Scoped to the services the
         # deploy actually drives, and to this project's names where the API
         # supports resource-level permissions - several of these do not.
-        - PolicyName: deploy-backend
+        - PolicyName: deploy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -207,6 +207,42 @@ Resources:
                   - logs:ListTagsForResource
                   - logs:PutRetentionPolicy
                   - logs:TagResource
+                Resource: "*"
+
+        # The frontend deploy and the API's custom domain. CloudFront and API
+        # Gateway accept few resource-level conditions, so these are broader.
+        - PolicyName: deploy-frontend
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SiteBucket
+                Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - !Sub "arn:aws:s3:::${ProjectName}-frontend-${AWS::AccountId}-*"
+                  - !Sub "arn:aws:s3:::${ProjectName}-frontend-${AWS::AccountId}-*/*"
+
+              - Sid: CloudFront
+                Effect: Allow
+                Action: cloudfront:*
+                Resource: "*"
+
+              - Sid: ApiGateway
+                Effect: Allow
+                Action: apigateway:*
+                Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/*"
+
+              - Sid: DnsAndCertificates
+                Effect: Allow
+                Action:
+                  - acm:DescribeCertificate
+                  - acm:ListCertificates
+                  - route53:ChangeResourceRecordSets
+                  - route53:GetChange
+                  - route53:GetHostedZone
+                  - route53:ListHostedZones
+                  - route53:ListResourceRecordSets
                 Resource: "*"
 
 Outputs:

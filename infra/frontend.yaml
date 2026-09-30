@@ -1,13 +1,12 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
 Description: >-
-  Peach frontend on CloudFront: a private S3 bucket holding the Next.js static
+  Spry frontend on CloudFront: a private S3 bucket holding the Next.js static
   export, reachable only through the distribution. Deployed by
   scripts/deploy-frontend.sh, which builds the site and syncs it into the bucket.
 
-  Optionally on a custom domain (make domain DOMAIN=app.example.com): the
-  distribution takes the alias and an ACM certificate from us-east-1. Only the
-  frontend takes a custom domain; the API stays on its Lambda function URL.
+  Optionally on a custom domain (make domain-frontend DOMAIN=app.example.com):
+  the distribution takes the alias and an ACM certificate from us-east-1.
 
   Built to stay free: CloudFront's always-free tier covers 1 TB/month out and
   10M requests, and nothing here uses a paid extra (no WAF, logging, Lambda@Edge,
@@ -17,7 +16,7 @@ Description: >-
 Parameters:
   ProjectName:
     Type: String
-    Default: peach
+    Default: spry
 
   DefaultRootObject:
     Type: String
@@ -28,7 +27,7 @@ Parameters:
     Default: ""
     Description: >-
       Optional custom domain, e.g. app.example.com. Managed by
-      scripts/domain-frontend.sh (make domain).
+      scripts/domain.sh (make domain-frontend).
 
   HostedZoneId:
     Type: String
@@ -42,7 +41,7 @@ Parameters:
     Default: ""
     Description: >-
       ACM certificate for DomainName. CloudFront only accepts certificates from
-      us-east-1. `make cert` fills this in.
+      us-east-1. scripts/domain.sh fills this in.
 
 Conditions:
   # A domain without a certificate is ignored rather than half-applied.
