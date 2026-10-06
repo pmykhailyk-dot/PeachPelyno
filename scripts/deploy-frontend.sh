@@ -73,6 +73,33 @@ log "building against ${API_URL}"
 [[ "${API_URL}" == https://* ]] \
   || die "BACKEND_URL must be https:// - browsers block an HTTPS page calling HTTP"
 
+# --- sign-in, if the auth stack has been deployed ---------------------------
+
+# Optional: a site with no Cognito stack yet still builds and deploys, just
+# without a working /login.
+AUTH_AUTHORITY="${AUTH_AUTHORITY:-}"
+AUTH_CLIENT_ID="${AUTH_CLIENT_ID:-}"
+AUTH_REDIRECT_URI="${AUTH_REDIRECT_URI:-}"
+AUTH_COGNITO_DOMAIN="${AUTH_COGNITO_DOMAIN:-}"
+AUTH_LOGOUT_URI="${AUTH_LOGOUT_URI:-}"
+if [[ -z "${AUTH_AUTHORITY}" ]]; then
+  # CI has no .env: ask the auth stack instead, same as BACKEND_URL above.
+  auth_output() {
+    aws cloudformation describe-stacks --stack-name "${AUTH_STACK_NAME:-${PROJECT_NAME}-auth}" \
+      --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text 2>/dev/null || true
+  }
+  AUTH_AUTHORITY="$(auth_output Authority)"; [[ "${AUTH_AUTHORITY}" == "None" ]] && AUTH_AUTHORITY=""
+  AUTH_CLIENT_ID="$(auth_output UserPoolClientId)"; [[ "${AUTH_CLIENT_ID}" == "None" ]] && AUTH_CLIENT_ID=""
+  AUTH_REDIRECT_URI="$(auth_output RedirectUri)"; [[ "${AUTH_REDIRECT_URI}" == "None" ]] && AUTH_REDIRECT_URI=""
+  AUTH_COGNITO_DOMAIN="$(auth_output CognitoDomain)"; [[ "${AUTH_COGNITO_DOMAIN}" == "None" ]] && AUTH_COGNITO_DOMAIN=""
+  AUTH_LOGOUT_URI="$(auth_output LogoutUri)"; [[ "${AUTH_LOGOUT_URI}" == "None" ]] && AUTH_LOGOUT_URI=""
+fi
+if [[ -n "${AUTH_AUTHORITY}" ]]; then
+  log "building with sign-in against ${AUTH_COGNITO_DOMAIN}"
+else
+  warn "AUTH_* not set in .env - building with sign-in disabled (run make deploy-auth)"
+fi
+
 # --- infrastructure ---------------------------------------------------------
 
 if ! aws cloudformation describe-stacks --stack-name "${STACK_NAME}" >/dev/null 2>&1; then
@@ -114,6 +141,11 @@ log "building the static export"
 rm -rf "${APP}/out"
 (cd "${APP}" && NEXT_OUTPUT=export \
   NEXT_PUBLIC_API_URL="${API_URL}" \
+  NEXT_PUBLIC_COGNITO_AUTHORITY="${AUTH_AUTHORITY}" \
+  NEXT_PUBLIC_COGNITO_CLIENT_ID="${AUTH_CLIENT_ID}" \
+  NEXT_PUBLIC_COGNITO_REDIRECT_URI="${AUTH_REDIRECT_URI}" \
+  NEXT_PUBLIC_COGNITO_DOMAIN="${AUTH_COGNITO_DOMAIN}" \
+  NEXT_PUBLIC_COGNITO_LOGOUT_URI="${AUTH_LOGOUT_URI}" \
   "${PM[@]}" build)
 [[ -f "${APP}/out/index.html" ]] || die "the export produced no out/index.html"
 

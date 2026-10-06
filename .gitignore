@@ -20,6 +20,9 @@ out/
 .env
 .env.local
 .env.*.local
+# Google's own download when you create an OAuth client - has the client
+# secret in plaintext.
+client_secret_*.json
 
 # --- editors / os ---
 .idea/

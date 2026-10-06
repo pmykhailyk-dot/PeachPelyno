@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Spry sign-in: a Cognito user pool with managed login, email + password and
+  "Continue with Google". Deployed by scripts/deploy-auth.sh, which reads the
+  frontend stack's SiteUrl so callback/logout URLs always match the deployed
+  site, and writes the pool's client id, domain and authority into .env for
+  the frontend build.
+
+  Essentials tier, which managed login needs, is free for the first 10,000
+  monthly active users. Google's client secret is a NoEcho parameter - it
+  never appears in a template diff or the stack's event history beyond this
+  one parameter value, which CloudFormation itself masks in the console too.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: spry
+
+  SiteUrl:
+    Type: String
+    Description: >-
+      The deployed frontend's origin, no trailing slash, e.g.
+      https://d111111abcdef8.cloudfront.net or https://demo.example.com.
+
+  LocalOrigin:
+    Type: String
+    Default: "http://localhost:3000"
+    Description: Dev server origin, so sign-in also works from `pnpm dev`.
+
+  DomainPrefix:
+    Type: String
+    Description: >-
+      Cognito hosted-domain prefix. Globally unique across all AWS accounts,
+      so scripts/deploy-auth.sh defaults it to "<ProjectName>-<account id>".
+
+  GoogleClientId:
+    Type: String
+    Description: OAuth client ID from Google Cloud Console (Web application).
+
+  GoogleClientSecret:
+    Type: String
+    NoEcho: true
+    Description: OAuth client secret from the same Google client.
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${ProjectName}-users"
+      UserPoolTier: ESSENTIALS
+      # Sign in with an email, not a separate chosen username.
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      UsernameConfiguration:
+        CaseSensitive: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      AdminCreateUserConfig:
+        # Self sign-up stays on - the lab requires it, and the lecturer signs
+        # up with their own account.
+        AllowAdminCreateUserOnly: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+      UserPoolTags:
+        PROJECT_NAME: !Ref ProjectName
+
+  # Google has to exist before a client can list it as a supported provider.
+  GoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: !Ref GoogleClientId
+        client_secret: !Ref GoogleClientSecret
+        authorize_scopes: "openid email profile"
+      # Without this a Google user arrives with no email, and the header has
+      # nothing to show.
+      AttributeMapping:
+        email: email
+        email_verified: email_verified
+        username: sub
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: GoogleIdentityProvider
+    Properties:
+      ClientName: !Sub "${ProjectName}-frontend"
+      UserPoolId: !Ref UserPool
+      # Public client: a browser cannot keep a secret.
+      GenerateSecret: false
+      ExplicitAuthFlows: []
+      PreventUserExistenceErrors: ENABLED
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      SupportedIdentityProviders: [COGNITO, Google]
+      # Registered for both with and without a trailing slash: the Next.js
+      # export's CloudFront rewrite treats /auth/callback and /auth/callback/
+      # the same, but Cognito matches the redirect_uri byte for byte.
+      CallbackURLs:
+        - !Sub "${SiteUrl}/auth/callback"
+        - !Sub "${SiteUrl}/auth/callback/"
+        - !Sub "${LocalOrigin}/auth/callback"
+        - !Sub "${LocalOrigin}/auth/callback/"
+      LogoutURLs:
+        - !Sub "${SiteUrl}/"
+        - !Ref SiteUrl
+        - !Sub "${LocalOrigin}/"
+        - !Ref LocalOrigin
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain: !Ref DomainPrefix
+      ManagedLoginVersion: 2
+
+  # A version-2 domain shows nothing without this - UseCognitoProvidedValues
+  # takes Cognito's default styling rather than a hand-built theme.
+  ManagedLoginBranding:
+    Type: AWS::Cognito::ManagedLoginBranding
+    DependsOn: UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientId: !Ref UserPoolClient
+      UseCognitoProvidedValues: true
+
+Outputs:
+  UserPoolId:
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+
+  CognitoDomain:
+    Description: Hosted login's base URL.
+    Value: !Sub "https://${DomainPrefix}.auth.${AWS::Region}.amazoncognito.com"
+
+  Authority:
+    Description: OIDC issuer / authority for the frontend's OIDC client.
+    Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+
+  RedirectUri:
+    Value: !Sub "${SiteUrl}/auth/callback"
+
+  LogoutUri:
+    Value: !Sub "${SiteUrl}/"
