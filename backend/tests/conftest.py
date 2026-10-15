@@ -24,6 +24,10 @@ def _test_database_url() -> str:
 
 os.environ["APP_ENV"] = "test"
 os.environ["DATABASE_URL"] = _test_database_url()
+# Matches Lambda (see infra/backend.yaml): without this, app.db's pooled
+# engine can hand out a connection tied to an event loop that a previous
+# asyncio.run() (e.g. in app.reports.weekly) already closed.
+os.environ["DB_POOLING"] = "false"
 
 from app.db import Base, get_session  # noqa: E402
 from app.main import create_app  # noqa: E402

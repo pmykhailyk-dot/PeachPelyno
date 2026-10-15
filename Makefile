@@ -1,6 +1,6 @@
 COMPOSE := docker compose
 
-.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-backend destroy-backend logs-backend migrate-backend domain-frontend domain-backend deploy-frontend destroy-frontend github-role deploy-auth destroy-auth
+.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-backend destroy-backend logs-backend migrate-backend domain-frontend domain-backend deploy-frontend destroy-frontend github-role deploy-auth destroy-auth deploy-reports destroy-reports report-now logs-report-builder logs-report-mailer
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -84,3 +84,18 @@ deploy-auth: ## Deploy the Cognito user pool (email+password, Google) and write 
 
 destroy-auth: ## Delete the Cognito stack, every signed-up user included
 	./scripts/destroy-auth.sh
+
+deploy-reports: ## Deploy the weekly report: SQS + schedule + builder/mailer Lambdas + S3 (needs make deploy-backend first)
+	./scripts/deploy-reports.sh
+
+destroy-reports: ## Delete the reports stack, every report in the bucket included
+	./scripts/destroy-reports.sh
+
+report-now: ## Build a report on demand: make report-now [WEEK=2026-W39]
+	./scripts/report-now.sh
+
+logs-report-builder: ## Tail the report-builder's CloudWatch logs
+	aws logs tail /aws/lambda/$${PROJECT_NAME:-spry}-report-builder --follow --since 10m
+
+logs-report-mailer: ## Tail the report-mailer's CloudWatch logs
+	aws logs tail /aws/lambda/$${PROJECT_NAME:-spry}-report-mailer --follow --since 10m
