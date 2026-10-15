@@ -18,9 +18,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthProvider {...cognitoAuthConfig}>
-      <QueryClientProvider client={queryClient}>
-        {children}
-      </QueryClientProvider>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </AuthProvider>
   );
 }
