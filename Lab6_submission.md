@@ -12,7 +12,7 @@ screen (`frontend/components/meeting-agenda-dialog.tsx`, `frontend/lib/parser.ts
 (`docs/adr/0006-llm-agenda-parsing.md`) and the updated container diagram
 (`docs/architecture/container-diagram.md`).
 
-Link: _(filled in after `git commit` — see the commit this file ships in)_.
+Link: https://github.com/pmykhailyk-dot/PeachPelyno/commit/b068e3b4742ee6834e9eec6c094d4b487b0628a9
 
 ## 2. Screen recording
 
