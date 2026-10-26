@@ -34,10 +34,12 @@ provider "aws" {
   region = var.region
 
   # PROJECT_NAME on every resource that takes tags (Lab 4's rule), without
-  # repeating it in every resource block.
+  # repeating it in every resource block. ManagedBy tells whoever finds a
+  # resource in the console not to edit it there: the next apply undoes it.
   default_tags {
     tags = {
       PROJECT_NAME = var.project_name
+      ManagedBy    = "terraform"
     }
   }
 }
