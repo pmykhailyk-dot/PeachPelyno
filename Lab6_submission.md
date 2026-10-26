@@ -16,8 +16,10 @@ Link: https://github.com/pmykhailyk-dot/PeachPelyno/commit/b068e3b4742ee6834e9ee
 
 ## 2. Screen recording
 
-_(pending — recorded against the deployed app once `make deploy-ai` + `make deploy-frontend` have
-run with real Bedrock model access granted)_
+`lab6-recording.mp4` (MP4, 38 s, attached to the submission), recorded in the deployed app
+(https://d1ar081hprmt5t.cloudfront.net): text in *Paste an agenda* → **Parse** (progress +
+Cancel) → the pre-filled form with a **suggested** badge → one field corrected (minutes → 5, the
+badge disappears) → **Save agenda** → "Agenda saved". Sign-in and typing time are cut out.
 
 ## 3. Test table — Part 4, Step 5
 
