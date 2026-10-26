@@ -3,7 +3,7 @@
 A plain function, no Lambda in it - test it from the laptop with `make parse
 TEXT="..."` before it ever runs behind a URL. It needs no database: text in,
 JSON out, which is exactly what lets the Lambda in app.ai.agenda_lambda run
-outside the VPC (see infra/ai.yml).
+outside the VPC (see infra/ai.tf).
 """
 
 from datetime import date

@@ -1,0 +1,20 @@
+# What `terraform plan` from a laptop must NOT upload to HCP Terraform. The
+# workspace's working directory is infra/, so the CLI sends the whole
+# repository - including untracked files git never sees.
+.git/
+.claude/
+.env
+.env.*
+!.env.example
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+infra/bootstrap/
+**/node_modules/
+frontend/.next/
+frontend/out/
+**/__pycache__/
+**/.venv/
+*.mp4
+*.mov
+*.png

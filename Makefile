@@ -1,6 +1,6 @@
 COMPOSE := docker compose
 
-.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-backend destroy-backend logs-backend migrate-backend domain-frontend domain-backend deploy-frontend destroy-frontend github-role deploy-auth destroy-auth deploy-reports destroy-reports report-now logs-report-builder logs-report-mailer llm-hello parse deploy-ai destroy-ai logs-ai
+.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-backend destroy-backend logs-backend migrate-backend domain-frontend domain-backend deploy-frontend destroy-frontend github-role infra-init infra-check infra-plan infra-output infra-env report-now logs-report-builder logs-report-mailer llm-hello parse logs-ai
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -79,17 +79,24 @@ destroy-frontend: ## Delete the frontend stack (bucket + distribution)
 github-role: ## Create the IAM role GitHub Actions assumes to deploy (OIDC, no keys)
 	./scripts/github-role.sh
 
-deploy-auth: ## Deploy the Cognito user pool (email+password, Google) and write its config to .env
-	./scripts/deploy-auth.sh
+# Sign-in, the weekly report and the agenda parser are Terraform (infra/*.tf),
+# applied by HCP Terraform after a merge to main. There is no infra-apply
+# here on purpose: a laptop plans, the workspace applies.
+infra-init: ## terraform init against the HCP Terraform workspace (needs `terraform login` once)
+	terraform -chdir=infra init
 
-destroy-auth: ## Delete the Cognito stack, every signed-up user included
-	./scripts/destroy-auth.sh
+infra-check: ## terraform fmt -check + validate - touches nothing in the cloud
+	terraform -chdir=infra fmt -check -recursive
+	terraform -chdir=infra validate
 
-deploy-reports: ## Deploy the weekly report: SQS + schedule + builder/mailer Lambdas + S3 (needs make deploy-backend first)
-	./scripts/deploy-reports.sh
+infra-plan: ## Speculative plan, run in HCP Terraform - shows what a merge would change
+	terraform -chdir=infra plan
 
-destroy-reports: ## Delete the reports stack, every report in the bucket included
-	./scripts/destroy-reports.sh
+infra-output: ## Show the infrastructure's outputs (user pool, queue, parser URL, ...)
+	terraform -chdir=infra output
+
+infra-env: ## Copy the outputs the frontend build needs (AUTH_*, PARSER_URL) into .env
+	./scripts/infra-env.sh
 
 report-now: ## Build a report on demand: make report-now [WEEK=2026-W39]
 	./scripts/report-now.sh
@@ -105,12 +112,6 @@ llm-hello: ## Call Claude on Bedrock once from your laptop (Lab 6, Part 1)
 
 parse: ## Parse pasted text into an agenda from your laptop: make parse TEXT="..."
 	./scripts/parse.sh
-
-deploy-ai: ## Deploy the agenda-parser Lambda (Lab 6) - needs make deploy-backend and make deploy-auth first
-	./scripts/deploy-ai.sh
-
-destroy-ai: ## Delete the agenda-parser stack
-	./scripts/destroy-ai.sh
 
 logs-ai: ## Tail the agenda-parser's CloudWatch logs
 	aws logs tail /aws/lambda/$${PROJECT_NAME:-spry}-agenda-parser --follow --since 10m

@@ -1,8 +1,9 @@
 import type { AuthProviderProps } from "react-oidc-context";
 
 /** Values are baked in at build time by scripts/deploy-frontend.sh (which
- *  reads them from the auth stack's outputs) - see NEXT_PUBLIC_COGNITO_* in
- *  .env.example. Blank locally until `make deploy-auth` has run once. */
+ *  writes them into .env from `terraform output`, or looks the pool up by name
+ *  in CI) - see NEXT_PUBLIC_COGNITO_* in .env.example. Blank locally until
+ *  `make infra-env` has run once. */
 const cognitoClientId = process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID ?? "";
 
 export const cognitoAuthConfig: AuthProviderProps = {

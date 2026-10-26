@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { actionItemSchema, agendaItemSchema } from "@/lib/api";
 
-/** The agenda-parser Lambda's own URL (infra/ai.yml), separate from the main
+/** The agenda-parser Lambda's own URL (infra/ai.tf), separate from the main
  *  API - Paste an agenda never goes through the backend, only Save does. */
 function parserUrl(): string {
   const url = process.env.NEXT_PUBLIC_PARSER_URL;

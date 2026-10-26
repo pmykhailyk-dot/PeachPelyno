@@ -29,6 +29,18 @@ client_secret_*.json
 .vscode/
 .DS_Store
 
+# --- terraform ---
+# The state lives in HCP Terraform, never in Git; the bootstrap's local state
+# stays on the laptop that applied it. .terraform.lock.hcl IS committed.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+infra/.build/
+generated.tf
+
 # --- docker ---
 pgdata/
 

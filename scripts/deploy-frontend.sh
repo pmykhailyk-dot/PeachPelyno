@@ -83,37 +83,48 @@ AUTH_REDIRECT_URI="${AUTH_REDIRECT_URI:-}"
 AUTH_COGNITO_DOMAIN="${AUTH_COGNITO_DOMAIN:-}"
 AUTH_LOGOUT_URI="${AUTH_LOGOUT_URI:-}"
 if [[ -z "${AUTH_AUTHORITY}" ]]; then
-  # CI has no .env: ask the auth stack instead, same as BACKEND_URL above.
-  auth_output() {
-    aws cloudformation describe-stacks --stack-name "${AUTH_STACK_NAME:-${PROJECT_NAME}-auth}" \
-      --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text 2>/dev/null || true
-  }
-  AUTH_AUTHORITY="$(auth_output Authority)"; [[ "${AUTH_AUTHORITY}" == "None" ]] && AUTH_AUTHORITY=""
-  AUTH_CLIENT_ID="$(auth_output UserPoolClientId)"; [[ "${AUTH_CLIENT_ID}" == "None" ]] && AUTH_CLIENT_ID=""
-  AUTH_REDIRECT_URI="$(auth_output RedirectUri)"; [[ "${AUTH_REDIRECT_URI}" == "None" ]] && AUTH_REDIRECT_URI=""
-  AUTH_COGNITO_DOMAIN="$(auth_output CognitoDomain)"; [[ "${AUTH_COGNITO_DOMAIN}" == "None" ]] && AUTH_COGNITO_DOMAIN=""
-  AUTH_LOGOUT_URI="$(auth_output LogoutUri)"; [[ "${AUTH_LOGOUT_URI}" == "None" ]] && AUTH_LOGOUT_URI=""
+  # CI has no .env. The user pool is Terraform's (infra/auth.tf) and CI has no
+  # Terraform login, so look it up by the names Terraform gives it - the
+  # names are the contract, as with the backend stack's outputs above.
+  POOL_ID="$(aws cognito-idp list-user-pools --max-results 60 \
+    --query "UserPools[?Name=='${PROJECT_NAME}-users'].Id | [0]" --output text 2>/dev/null || true)"
+  [[ "${POOL_ID}" == "None" ]] && POOL_ID=""
+  if [[ -n "${POOL_ID}" ]]; then
+    AUTH_CLIENT_ID="$(aws cognito-idp list-user-pool-clients --user-pool-id "${POOL_ID}" \
+      --query "UserPoolClients[?ClientName=='${PROJECT_NAME}-frontend'].ClientId | [0]" --output text 2>/dev/null || true)"
+    [[ "${AUTH_CLIENT_ID}" == "None" ]] && AUTH_CLIENT_ID=""
+    ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+    # The callback URLs Terraform registered are built from this same SiteUrl.
+    AUTH_SITE_URL="$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" \
+      --query "Stacks[0].Outputs[?OutputKey=='SiteUrl'].OutputValue" --output text 2>/dev/null || true)"
+    AUTH_SITE_URL="${AUTH_SITE_URL%/}"
+    AUTH_AUTHORITY="https://cognito-idp.${AWS_REGION}.amazonaws.com/${POOL_ID}"
+    AUTH_COGNITO_DOMAIN="https://${PROJECT_NAME}-${ACCOUNT_ID}.auth.${AWS_REGION}.amazoncognito.com"
+    AUTH_REDIRECT_URI="${AUTH_SITE_URL}/auth/callback"
+    AUTH_LOGOUT_URI="${AUTH_SITE_URL}/"
+  fi
 fi
-if [[ -n "${AUTH_AUTHORITY}" ]]; then
+if [[ -n "${AUTH_AUTHORITY}" && -n "${AUTH_CLIENT_ID}" ]]; then
   log "building with sign-in against ${AUTH_COGNITO_DOMAIN}"
 else
-  warn "AUTH_* not set in .env - building with sign-in disabled (run make deploy-auth)"
+  AUTH_AUTHORITY=""
+  warn "AUTH_* not set in .env and no ${PROJECT_NAME}-users pool found - building with sign-in disabled (make infra-env)"
 fi
 
-# --- agenda parser, if that stack has been deployed -------------------------
+# --- agenda parser, if Terraform has created it -----------------------------
 
-# Optional, same as auth above: a site with no ai stack yet still builds and
+# Optional, same as auth above: a site with no parser yet still builds and
 # deploys, just without a working Paste an agenda screen.
 PARSER_URL="${PARSER_URL:-}"
 if [[ -z "${PARSER_URL}" ]]; then
-  PARSER_URL="$(aws cloudformation describe-stacks --stack-name "${AI_STACK_NAME:-${PROJECT_NAME}-ai}" \
-    --query "Stacks[0].Outputs[?OutputKey=='ParserUrl'].OutputValue" --output text 2>/dev/null || true)"
+  PARSER_URL="$(aws lambda get-function-url-config --function-name "${PROJECT_NAME}-agenda-parser" \
+    --query FunctionUrl --output text 2>/dev/null || true)"
   [[ "${PARSER_URL}" == "None" ]] && PARSER_URL=""
 fi
 if [[ -n "${PARSER_URL}" ]]; then
   log "building with Paste an agenda against ${PARSER_URL}"
 else
-  warn "PARSER_URL not set in .env - building with Paste an agenda disabled (run make deploy-ai)"
+  warn "PARSER_URL not set in .env - building with Paste an agenda disabled (make infra-env)"
 fi
 
 # --- infrastructure ---------------------------------------------------------

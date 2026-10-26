@@ -47,6 +47,33 @@ make github-role                                  # OIDC role for GitHub Actions
 From then on every green push to `main` redeploys both sides
 ([ci-cd.yml](.github/workflows/ci-cd.yml)).
 
-Tear down when done: `make destroy-frontend && make destroy-backend`.
+## Infrastructure as code: Terraform
+
+Sign-in (Cognito), the weekly report and the agenda parser live in [`infra/*.tf`](infra/) and
+are applied by **HCP Terraform** (workspace `spry-dev`, remote execution, AWS reached through
+OIDC - no access keys anywhere). Why, and who may change what: [ADR 0007](docs/adr/0007-terraform.md).
+
+The road to a change is a pull request, never a laptop:
+
+1. Edit `infra/*.tf`, then `make infra-check` (fmt + validate) and `make infra-plan`
+   (a speculative plan, run remotely - it cannot apply).
+2. Open a PR: HCP Terraform posts the plan on it.
+3. Merge to `main`: HCP Terraform plans again and applies. There is no `make` target for apply.
+
+```bash
+terraform login        # once, a user token for app.terraform.io
+make infra-init        # once per clone
+make infra-plan        # what would change
+make infra-env         # write AUTH_* and PARSER_URL from `terraform output` into .env
+```
+
+The Google client secret (sensitive) and the email addresses are variables in the workspace,
+not in the repo; `DATABASE_URL` is read from Secrets Manager at plan time. The
+backend, the frontend and the GitHub OIDC role are still CloudFormation (`make deploy-*`), and
+the backend image the report builder and the parser run is rolled by `make deploy-backend`, not
+by Terraform.
+
+Tear down when done: destroy the `spry-dev` workspace in HCP Terraform, then
+`make destroy-frontend && make destroy-backend`.
 
 Based on the course starter [dobosevych/Peach](https://github.com/dobosevych/Peach).

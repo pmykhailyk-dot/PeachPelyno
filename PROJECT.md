@@ -62,17 +62,23 @@ spry/
 ├── docker-compose.override.yml # dev only: bind mounts + hot reload (loaded automatically)
 ├── Makefile                    # the command contract: local and CI run the same targets
 ├── .github/workflows/ci-cd.yml # lint + test on every push; deploy on green push to main
-├── infra/                      # CloudFormation templates, one per stack
-│   ├── backend.yaml            #   Lambda + function URL + Aurora Serverless v2 + API custom domain
-│   ├── frontend.yaml           #   private S3 bucket + CloudFront + custom domain
-│   ├── auth.yaml                #   Cognito user pool (email+password, Google)
-│   ├── reports.yml             #   weekly report: builder + mailer Lambdas, SQS, schedule
-│   ├── ai.yml                  #   agenda-parser Lambda (Lab 6): no VPC, Bedrock, budget alert
-│   └── github-oidc.yaml        #   the IAM role GitHub Actions assumes (OIDC, no keys)
+├── infra/                      # Terraform (HCP workspace spry-dev) + the CloudFormation left
+│   ├── versions.tf             #   cloud block, providers, default tags
+│   ├── variables.tf            #   inputs; secrets are workspace variables, not in tfvars
+│   ├── terraform.tfvars        #   non-secret values
+│   ├── data.tf                 #   what Terraform reads: backend/frontend stacks, DB secret, VPC
+│   ├── auth.tf                 #   Cognito user pool (email+password, Google)
+│   ├── reports.tf              #   weekly report: builder + mailer Lambdas, SQS, schedule
+│   ├── ai.tf                   #   agenda-parser Lambda (Lab 6): no VPC, Bedrock, budget alert
+│   ├── outputs.tf              #   read by make infra-env
+│   ├── bootstrap/              #   one-off, local state: the OIDC role HCP Terraform assumes
+│   ├── backend.yaml            #   CloudFormation: Lambda + function URL + Aurora + API domain
+│   ├── frontend.yaml           #   CloudFormation: private S3 bucket + CloudFront + domain
+│   └── github-oidc.yaml        #   CloudFormation: the IAM role GitHub Actions assumes
 ├── scripts/                    # what the Makefile calls; each one is idempotent
 │   ├── deploy-backend.sh       #   build image -> ECR (tag = commit SHA) -> stack -> migrate
 │   ├── deploy-frontend.sh      #   static export -> S3 -> CloudFront invalidation
-│   ├── deploy-ai.sh            #   reuses the backend image + the auth user pool -> infra/ai.yml
+│   ├── infra-env.sh            #   terraform output -> AUTH_* and PARSER_URL in .env
 │   ├── llm-hello.sh, parse.sh  #   laptop-only checks against Bedrock (Lab 6, Part 1 + 4)
 │   ├── domain.sh               #   ACM certificate (DNS-validated) + custom domain, either side
 │   ├── github-role.sh          #   creates the OIDC role, sets repo variables
@@ -212,7 +218,7 @@ followed a parse — kept next to the corrected version as the feedback signal (
 thumbs-up table needed: every correction already is one). `200` with the saved `Agenda`, `404`
 if the meeting does not exist, `422` on an invalid body.
 
-This is the **only** endpoint that writes an agenda. The agenda-parser Lambda (`infra/ai.yml`)
+This is the **only** endpoint that writes an agenda. The agenda-parser Lambda (`infra/ai.tf`)
 only ever returns a suggestion to the browser; it has no database access and cannot call this
 endpoint or any other write path.
 
@@ -293,7 +299,12 @@ browser ──HTTPS──> api.<domain>  API Gateway HTTP API ──> Lambda (Fa
   `alembic check`, ESLint, Prettier, tsc, vitest. A green push to `main` → `make deploy-backend`
   then `make deploy-frontend`, authenticated by **OIDC**: the role in `infra/github-oidc.yaml`
   trusts only `repo:<owner>/<repo>:ref:refs/heads/main` with audience `sts.amazonaws.com`.
-- **Agenda parser** (Lab 6, `infra/ai.yml`, deployed by `make deploy-ai`, not by CI): a Lambda
+- **Infrastructure as code** (Lab 7): Cognito, the weekly report and the agenda parser were
+  imported from CloudFormation into Terraform (`import` blocks, no resource re-created) and are
+  applied by HCP Terraform on merge to `main` - plan on the PR, apply on merge, never from a
+  laptop. Two roads: Terraform owns the infrastructure, `make deploy-backend` owns which image
+  the functions run (`ignore_changes = [image_uri]`). See `docs/adr/0007-terraform.md`.
+- **Agenda parser** (Lab 6, `infra/ai.tf`, applied by HCP Terraform, not by CI): a Lambda
   running the backend's own image under a different handler
   (`app.ai.agenda_lambda.handler`), outside the VPC and with no database - it calls Claude on
   Bedrock and returns JSON, nothing else. Its function URL is public but authenticated (a

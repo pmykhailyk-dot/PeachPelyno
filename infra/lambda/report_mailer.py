@@ -6,8 +6,8 @@ on ``reports/*.csv`` - the builder and this function never call each other
 directly, only through that event, which is the part that makes this
 event-driven rather than just "two functions that happen to run in order".
 
-Deployed inline (Code.ZipFile) by infra/reports.yml, which reads this file's
-source and passes it as a CloudFormation parameter - see scripts/deploy-reports.sh.
+Zipped from the repository by Terraform (data.archive_file.mailer in
+infra/reports.tf) on every run - no build step, no dependencies.
 Must never write into reports/: a function invoked by uploads to that prefix
 that also uploads there would call itself forever.
 """

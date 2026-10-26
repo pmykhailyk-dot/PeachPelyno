@@ -102,6 +102,16 @@ Resources:
                   - cloudformation:ListStacks
                 Resource: "*"
 
+              # deploy-frontend looks the user pool and its client up by name
+              # (Terraform owns them since Lab 7, so there is no stack output
+              # to read). List* has no resource-level permissions.
+              - Sid: CognitoReadOnly
+                Effect: Allow
+                Action:
+                  - cognito-idp:ListUserPools
+                  - cognito-idp:ListUserPoolClients
+                Resource: "*"
+
               - Sid: EcrLogin
                 Effect: Allow
                 Action: ecr:GetAuthorizationToken

@@ -1,8 +1,8 @@
 """Lambda entry point for the agenda-parser (Lab 6, Part 4, Step 3).
 
 Outside the VPC and stateless: text in, JSON out, no database. Reused from
-the backend's image, a different handler - see infra/ai.yml
-(``ImageConfig: Command: ["app.ai.agenda_lambda.handler"]``), the same split
+the backend's image, a different handler - see infra/ai.tf
+(``image_config { command = ["app.ai.agenda_lambda.handler"] }``), the same split
 Lab 5 used for the report mailer.
 
 Auth is required because every call costs money: the bearer token is checked
@@ -33,7 +33,7 @@ MAX_TEXT_LENGTH = 10_000
 
 
 def _response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
-    # CORS headers come from the function URL's own Cors config (infra/ai.yml),
+    # CORS headers come from the function URL's own cors block (infra/ai.tf),
     # not from here - adding them twice would conflict.
     return {
         "statusCode": status_code,

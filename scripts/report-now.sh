@@ -27,14 +27,14 @@ for var in AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 done
 
 PROJECT_NAME="${PROJECT_NAME:-spry}"
-STACK_NAME="${REPORTS_STACK_NAME:-${PROJECT_NAME}-reports}"
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 export AWS_DEFAULT_REGION="${AWS_REGION}"
 
-QUEUE_URL="$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" \
-  --query "Stacks[0].Outputs[?OutputKey=='ReportRequestsQueueUrl'].OutputValue" --output text 2>/dev/null)"
+# The queue is Terraform's (infra/reports.tf); its name is the contract.
+QUEUE_URL="$(aws sqs get-queue-url --queue-name "${PROJECT_NAME}-report-requests" \
+  --query QueueUrl --output text 2>/dev/null)"
 [[ -n "${QUEUE_URL}" && "${QUEUE_URL}" != "None" ]] \
-  || die "stack ${STACK_NAME} has no ReportRequestsQueueUrl output - run make deploy-reports first"
+  || die "no ${PROJECT_NAME}-report-requests queue - has HCP Terraform applied infra/ yet?"
 
 BODY="$(WEEK="${WEEK:-}" python3 -c '
 import json, os
