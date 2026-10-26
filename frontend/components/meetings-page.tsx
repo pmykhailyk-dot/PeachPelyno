@@ -1,9 +1,17 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, Clock, Plus, RotateCw, Users } from "lucide-react";
+import {
+  CalendarDays,
+  ClipboardList,
+  Clock,
+  Plus,
+  RotateCw,
+  Users,
+} from "lucide-react";
 import { useState } from "react";
 
+import { MeetingAgendaDialog } from "@/components/meeting-agenda-dialog";
 import { MeetingFormDialog } from "@/components/meeting-form-dialog";
 import { MeetingStats } from "@/components/meeting-stats";
 import { PageHeader } from "@/components/page-header";
@@ -49,7 +57,13 @@ function durationLabel(m: Meeting): string {
   return rest ? `${h} h ${rest} min` : `${h} h`;
 }
 
-function MeetingCard({ meeting }: { meeting: Meeting }) {
+function MeetingCard({
+  meeting,
+  onOpenAgenda,
+}: {
+  meeting: Meeting;
+  onOpenAgenda: (meeting: Meeting) => void;
+}) {
   return (
     <li className="flex items-center gap-4 rounded-xl border bg-card p-4 shadow-notion-xs transition hover:shadow-notion-sm">
       <div className="grid w-16 shrink-0 text-center">
@@ -74,12 +88,17 @@ function MeetingCard({ meeting }: { meeting: Meeting }) {
           </span>
         </p>
       </div>
+      <Button size="sm" variant="outline" onClick={() => onOpenAgenda(meeting)}>
+        <ClipboardList data-icon="inline-start" className="size-3.5" />
+        Agenda
+      </Button>
     </li>
   );
 }
 
 export function MeetingsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [agendaMeeting, setAgendaMeeting] = useState<Meeting | null>(null);
   const query = useQuery({ queryKey: ["meetings"], queryFn: api.listMeetings });
 
   return (
@@ -147,7 +166,11 @@ export function MeetingsPage() {
                   </h2>
                   <ul className="grid gap-2">
                     {meetings.map((m) => (
-                      <MeetingCard key={m.id} meeting={m} />
+                      <MeetingCard
+                        key={m.id}
+                        meeting={m}
+                        onOpenAgenda={setAgendaMeeting}
+                      />
                     ))}
                   </ul>
                 </div>
@@ -158,6 +181,10 @@ export function MeetingsPage() {
       )}
 
       <MeetingFormDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+      <MeetingAgendaDialog
+        meeting={agendaMeeting}
+        onOpenChange={(open) => !open && setAgendaMeeting(null)}
+      />
     </main>
   );
 }

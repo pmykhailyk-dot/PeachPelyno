@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Spry agenda-parser (Lab 6, Part 4): a Lambda function, outside the VPC and
+  with no database, that turns pasted text into a structured meeting agenda
+  through Claude on Amazon Bedrock. Reuses the backend's image - the parser
+  is just another handler on it, app.ai.agenda_lambda.handler, the same split
+  Lab 5 used for the report mailer.
+
+  The function needs no NAT and no VPC endpoint: it has nothing to reach but
+  Bedrock, over the public AWS API, so it costs $0 when idle. Its function URL
+  is public but authenticated - every call costs money, so the handler checks
+  a Cognito bearer token (Lab 4) before anything reaches the model - and
+  limited to 10,000 characters of input. A $5/month AWS Budgets alert is the
+  backstop.
+
+  Deployed by scripts/deploy-ai.sh, which reuses what `make deploy-backend`
+  already created (the image) and what `make deploy-auth` already created
+  (the user pool), so run both of those first.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: spry
+
+  ImageUri:
+    Type: String
+    Description: The backend's image URI (same one `make deploy-backend` pushed).
+
+  Architecture:
+    Type: String
+    Default: arm64
+    AllowedValues: [arm64, x86_64]
+
+  MemorySize:
+    Type: Number
+    Default: 512
+    MinValue: 128
+    MaxValue: 10240
+
+  TimeoutSeconds:
+    Type: Number
+    Default: 30
+    MinValue: 3
+    MaxValue: 900
+
+  ParserModel:
+    Type: String
+    Default: us.anthropic.claude-opus-4-5-20251101-v1:0
+    Description: Bedrock model id - change this and redeploy to compare models (Part 4, Step 5).
+
+  CorsOrigins:
+    Type: CommaDelimitedList
+    Description: >-
+      Browser origins allowed to call the function URL, e.g. the deployed
+      frontend's SiteUrl and http://localhost:3000 for local dev.
+
+  AuthUserPoolId:
+    Type: String
+    Description: Cognito user pool id (Lab 4) the handler verifies bearer tokens against.
+
+  AuthClientId:
+    Type: String
+    Description: Cognito app client id - the ID token's expected audience.
+
+  BudgetAmount:
+    Type: Number
+    Default: 5
+    Description: Monthly USD threshold for the cost alert.
+
+  BudgetEmail:
+    Type: String
+    Description: Where AWS Budgets sends the alert.
+
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+
+Resources:
+  # --- function -------------------------------------------------------------
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-agenda-parser"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # No VPC access policy: this function never joins the VPC (Part 4 -
+        # "notice what the parser does not need: the database").
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: call-bedrock
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                # "*" for now - narrowing it to specific model ARNs is a
+                # discussion question (Part 4, "What would a narrow policy
+                # look like?"), left wide here to keep the lab moving.
+                Action: bedrock:InvokeModel
+                Resource: "*"
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-agenda-parser"
+      Description: !Sub "${ProjectName} agenda parser (text -> structured agenda via Claude on Bedrock)"
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command: ["app.ai.agenda_lambda.handler"]
+      Architectures: [!Ref Architecture]
+      MemorySize: !Ref MemorySize
+      Timeout: !Ref TimeoutSeconds
+      Role: !GetAtt ExecutionRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref LogGroup
+      # No VpcConfig: no database to reach, so no network interfaces, no
+      # subnets, no NAT - $0 when idle (Part 4's architecture lesson).
+      Environment:
+        Variables:
+          PARSER_MODEL: !Ref ParserModel
+          AUTH_USER_POOL_ID: !Ref AuthUserPoolId
+          AUTH_CLIENT_ID: !Ref AuthClientId
+          LOG_LEVEL: INFO
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  # Native CORS on the function URL (not in the handler) - only POST, only
+  # from the site's own origins, as Step 3 asks for.
+  FunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref Function
+      AuthType: NONE
+      Cors:
+        AllowOrigins: !Ref CorsOrigins
+        AllowMethods: [POST]
+        AllowHeaders: [content-type, authorization]
+        MaxAge: 300
+
+  FunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  FunctionUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  # --- budget -----------------------------------------------------------
+
+  Budget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub "${ProjectName}-agenda-parser-monthly"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref BudgetAmount
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+
+Outputs:
+  FunctionName:
+    Value: !Ref Function
+
+  ParserUrl:
+    Description: What the frontend calls to parse pasted text.
+    Value: !GetAtt FunctionUrl.FunctionUrl
+
+  LogGroupName:
+    Value: !Ref LogGroup

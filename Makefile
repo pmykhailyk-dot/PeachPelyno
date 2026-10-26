@@ -1,6 +1,6 @@
 COMPOSE := docker compose
 
-.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-backend destroy-backend logs-backend migrate-backend domain-frontend domain-backend deploy-frontend destroy-frontend github-role deploy-auth destroy-auth deploy-reports destroy-reports report-now logs-report-builder logs-report-mailer
+.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-backend destroy-backend logs-backend migrate-backend domain-frontend domain-backend deploy-frontend destroy-frontend github-role deploy-auth destroy-auth deploy-reports destroy-reports report-now logs-report-builder logs-report-mailer llm-hello parse deploy-ai destroy-ai logs-ai
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -99,3 +99,18 @@ logs-report-builder: ## Tail the report-builder's CloudWatch logs
 
 logs-report-mailer: ## Tail the report-mailer's CloudWatch logs
 	aws logs tail /aws/lambda/$${PROJECT_NAME:-spry}-report-mailer --follow --since 10m
+
+llm-hello: ## Call Claude on Bedrock once from your laptop (Lab 6, Part 1)
+	./scripts/llm-hello.sh
+
+parse: ## Parse pasted text into an agenda from your laptop: make parse TEXT="..."
+	./scripts/parse.sh
+
+deploy-ai: ## Deploy the agenda-parser Lambda (Lab 6) - needs make deploy-backend and make deploy-auth first
+	./scripts/deploy-ai.sh
+
+destroy-ai: ## Delete the agenda-parser stack
+	./scripts/destroy-ai.sh
+
+logs-ai: ## Tail the agenda-parser's CloudWatch logs
+	aws logs tail /aws/lambda/$${PROJECT_NAME:-spry}-agenda-parser --follow --since 10m

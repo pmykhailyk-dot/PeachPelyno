@@ -100,6 +100,22 @@ else
   warn "AUTH_* not set in .env - building with sign-in disabled (run make deploy-auth)"
 fi
 
+# --- agenda parser, if that stack has been deployed -------------------------
+
+# Optional, same as auth above: a site with no ai stack yet still builds and
+# deploys, just without a working Paste an agenda screen.
+PARSER_URL="${PARSER_URL:-}"
+if [[ -z "${PARSER_URL}" ]]; then
+  PARSER_URL="$(aws cloudformation describe-stacks --stack-name "${AI_STACK_NAME:-${PROJECT_NAME}-ai}" \
+    --query "Stacks[0].Outputs[?OutputKey=='ParserUrl'].OutputValue" --output text 2>/dev/null || true)"
+  [[ "${PARSER_URL}" == "None" ]] && PARSER_URL=""
+fi
+if [[ -n "${PARSER_URL}" ]]; then
+  log "building with Paste an agenda against ${PARSER_URL}"
+else
+  warn "PARSER_URL not set in .env - building with Paste an agenda disabled (run make deploy-ai)"
+fi
+
 # --- infrastructure ---------------------------------------------------------
 
 if ! aws cloudformation describe-stacks --stack-name "${STACK_NAME}" >/dev/null 2>&1; then
@@ -146,6 +162,7 @@ rm -rf "${APP}/out"
   NEXT_PUBLIC_COGNITO_REDIRECT_URI="${AUTH_REDIRECT_URI}" \
   NEXT_PUBLIC_COGNITO_DOMAIN="${AUTH_COGNITO_DOMAIN}" \
   NEXT_PUBLIC_COGNITO_LOGOUT_URI="${AUTH_LOGOUT_URI}" \
+  NEXT_PUBLIC_PARSER_URL="${PARSER_URL}" \
   "${PM[@]}" build)
 [[ -f "${APP}/out/index.html" ]] || die "the export produced no out/index.html"
 

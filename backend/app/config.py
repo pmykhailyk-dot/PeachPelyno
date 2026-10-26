@@ -14,6 +14,16 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "production"] = "development"
     log_level: str = "info"
 
+    # --- agenda-parser Lambda (Lab 6) ---
+    # Model id, not code: swapping models or comparing Opus vs. Haiku (Part 4,
+    # Step 5) is an env var change, not a redeploy of different code.
+    parser_model: str = "us.anthropic.claude-opus-4-5-20251101-v1:0"
+    # Cognito user pool the parser's function URL checks bearer tokens
+    # against - same pool as the frontend's sign-in (Lab 4). Blank locally,
+    # where the parser is exercised through `make parse` instead of the URL.
+    auth_user_pool_id: str = ""
+    auth_client_id: str = ""
+
     database_url: str = "postgresql+asyncpg://spry:spry@db:5432/spry"
     # Off on Lambda: a warm but idle execution environment would otherwise hold
     # pooled connections open, and Aurora Serverless only pauses at zero.
