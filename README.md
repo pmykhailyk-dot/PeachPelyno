@@ -76,4 +76,57 @@ by Terraform.
 Tear down when done: destroy the `spry-dev` workspace in HCP Terraform, then
 `make destroy-frontend && make destroy-backend`.
 
+## The same core on Google Cloud (Lab 9)
+
+The frontend, the API and the database also run on Google Cloud, in project `spry-pelyno-2026`
+(`us-central1`). Why each service, and what stayed on AWS:
+[ADR 0008](docs/adr/0008-google-cloud.md).
+
+| AWS | Google Cloud |
+|---|---|
+| S3 + CloudFront | Firebase Hosting, `https://spry-pelyno-2026.web.app` (`/api/**` rewritten to Cloud Run) |
+| Lambda + function URL | Cloud Run `spry-api`, min 0 instances |
+| Aurora Serverless v2 | Cloud SQL for PostgreSQL 17, `db-f1-micro` - **does not pause** |
+| ECR, Secrets Manager | Artifact Registry `spry`, Secret Manager `spry-database-url` |
+
+**Still on AWS:** sign-in (Cognito), the weekly report and the agenda parser. The Google Cloud
+site is built with sign-in and *Paste an agenda* switched off, and its database is a copy of
+Aurora's, not a replica.
+
+`gcp/*.tf` is its own HCP Terraform workspace, `spry-gcp`, with its own state. Same road as
+`infra/`: a PR gets a plan, a merge to `main` applies. HCP Terraform reaches the project through
+workload identity federation. No service account key exists.
+
+Once per project, from a laptop:
+
+```bash
+gcloud auth login && gcloud auth application-default login
+gcloud projects create spry-pelyno-2026 --name=Spry --organization=<org-id>
+gcloud billing projects link spry-pelyno-2026 --billing-account=<billing-account-id>
+cd gcp/bootstrap && terraform init && terraform apply -var project_id=spry-pelyno-2026
+# then add Firebase to the project once in console.firebase.google.com (accepts its terms)
+```
+
+Then:
+
+```bash
+# in .env: GCP_PROJECT=spry-pelyno-2026, GCP_REGION=us-central1
+make gcp-plan              # speculative plan of gcp/; merge the PR to apply
+make gcp-deploy-backend    # build the runtime image (linux/amd64), push, roll Cloud Run
+make gcp-copy-data         # meetings + agendas from the API on AWS to the one on Google Cloud
+make gcp-deploy-frontend   # static export -> Firebase Hosting
+```
+
+**Stop the database when you are not using it.** Cloud SQL bills $0.0105 an hour while it runs
+(≈ $7.70 a month). Stopped, only its disk bills (≈ $1.70), and the API answers 503 until it is
+started again:
+
+```bash
+make gcp-db-stop
+make gcp-db-start
+```
+
+Tear down: destroy the `spry-gcp` workspace in HCP Terraform, then
+`terraform -chdir=gcp/bootstrap destroy -var project_id=spry-pelyno-2026`.
+
 Based on the course starter [dobosevych/Peach](https://github.com/dobosevych/Peach).
