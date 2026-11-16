@@ -852,13 +852,13 @@ wheels = [
 name = "spry-backend"
 version = "0.1.0"
 source = { virtual = "." }
+default-groups = ["dev", "lambda"]
 dependencies = [
     { name = "alembic" },
     { name = "anthropic", extra = ["bedrock"] },
     { name = "asyncpg" },
     { name = "boto3" },
     { name = "fastapi" },
-    { name = "mangum" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
@@ -873,6 +873,9 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
+lambda = [
+    { name = "mangum" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -881,7 +884,6 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.31" },
     { name = "boto3", specifier = ">=1.35" },
     { name = "fastapi", specifier = ">=0.118" },
-    { name = "mangum", specifier = ">=0.22.0" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pydantic-settings", specifier = ">=2.7" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9" },
@@ -896,6 +898,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.25" },
     { name = "ruff", specifier = ">=0.9" },
 ]
+lambda = [{ name = "mangum", specifier = ">=0.22.0" }]
 
 [[package]]
 name = "sqlalchemy"
