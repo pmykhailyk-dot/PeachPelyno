@@ -41,6 +41,11 @@ crash.log
 infra/.build/
 generated.tf
 
+# --- firebase ---
+# firebase-tools' deploy cache and its debug log.
+.firebase/
+firebase-debug.log
+
 # --- docker ---
 pgdata/
 

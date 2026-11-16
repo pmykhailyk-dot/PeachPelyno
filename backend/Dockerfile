@@ -13,7 +13,7 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-default-groups --no-install-project
 
 # --- dev: same base plus dev dependencies, used by docker-compose.override.yml ---
 FROM builder AS dev
@@ -67,7 +67,8 @@ FROM public.ecr.aws/lambda/python:3.14 AS lambda
 RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=uv.lock,target=uv.lock \
-    uv export --frozen --no-dev --no-hashes --no-emit-project -o /tmp/requirements.txt \
+    uv export --frozen --no-default-groups --group lambda --no-hashes --no-emit-project \
+        -o /tmp/requirements.txt \
     && uv pip install --no-cache --compile-bytecode \
         --target "${LAMBDA_TASK_ROOT}" -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt

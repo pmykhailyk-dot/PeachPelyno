@@ -1,6 +1,6 @@
 COMPOSE := docker compose
 
-.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-backend destroy-backend logs-backend migrate-backend domain-frontend domain-backend deploy-frontend destroy-frontend github-role infra-init infra-check infra-plan infra-output infra-env report-now logs-report-builder logs-report-mailer llm-hello parse logs-ai
+.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-backend destroy-backend logs-backend migrate-backend domain-frontend domain-backend deploy-frontend destroy-frontend github-role infra-init infra-check infra-plan infra-output infra-env report-now logs-report-builder logs-report-mailer llm-hello parse logs-ai gcp-init gcp-check gcp-plan gcp-output gcp-deploy-backend gcp-deploy-frontend gcp-copy-data gcp-db-stop gcp-db-start logs-gcp
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -115,3 +115,38 @@ parse: ## Parse pasted text into an agenda from your laptop: make parse TEXT="..
 
 logs-ai: ## Tail the agenda-parser's CloudWatch logs
 	aws logs tail /aws/lambda/$${PROJECT_NAME:-spry}-agenda-parser --follow --since 10m
+
+# Spry's core on Google Cloud (Lab 9): gcp/*.tf, its own HCP Terraform
+# workspace (spry-gcp) and state, applied after a merge to main like infra/.
+# Terraform owns the service and the database; the image and the site are
+# rolled from here, as on AWS.
+gcp-init: ## terraform init against the spry-gcp workspace
+	terraform -chdir=gcp init
+
+gcp-check: ## terraform fmt -check + validate for gcp/ - touches nothing in the cloud
+	terraform -chdir=gcp fmt -check -recursive
+	terraform -chdir=gcp validate
+
+gcp-plan: ## Speculative plan of gcp/, run in HCP Terraform
+	terraform -chdir=gcp plan
+
+gcp-output: ## Show gcp/'s outputs (API URL, site URL, registry, ...)
+	terraform -chdir=gcp output
+
+gcp-deploy-backend: ## Build the runtime image, push it to Artifact Registry, roll Cloud Run onto it
+	./scripts/gcp-deploy-backend.sh
+
+gcp-deploy-frontend: ## Static export -> Firebase Hosting, /api/** rewritten to Cloud Run
+	./scripts/gcp-deploy-frontend.sh
+
+gcp-copy-data: ## Copy the meetings and agendas from the API on AWS to the one on GCP
+	./scripts/gcp-copy-data.sh
+
+gcp-db-stop: ## Stop Cloud SQL (it does not pause on its own; stopped, only the disk bills)
+	./scripts/gcp-db.sh stop
+
+gcp-db-start: ## Start Cloud SQL again
+	./scripts/gcp-db.sh start
+
+logs-gcp: ## The Cloud Run service's recent logs
+	gcloud run services logs read $${PROJECT_NAME:-spry}-api --region $${GCP_REGION:-us-central1} --limit 50

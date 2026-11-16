@@ -11,13 +11,17 @@ dependencies = [
     "alembic>=1.14",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
-    "mangum>=0.22.0",
     "boto3>=1.35",
     "anthropic[bedrock]>=0.69",
     "pyjwt[crypto]>=2.9",
 ]
 
 [dependency-groups]
+# Only the Lambda image (Dockerfile, target lambda) needs the ASGI adapter;
+# the image Cloud Run and Compose run serves HTTP with uvicorn itself.
+lambda = [
+    "mangum>=0.22.0",
+]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
@@ -27,6 +31,8 @@ dev = [
 
 [tool.uv]
 package = false
+# Tests cover the Lambda handler too, so a plain `uv sync` installs both.
+default-groups = ["dev", "lambda"]
 
 [tool.ruff]
 line-length = 100
